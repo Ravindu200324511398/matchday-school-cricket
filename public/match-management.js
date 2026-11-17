@@ -31,7 +31,7 @@ function matchManagement(match) {
   ${match.canEditFixture&&!offlineQueue.length?fixtureEditor(match):''}
   ${isAdmin&&!match.canEditFixture?`<p class="subtitle">${tr('Fixture details are locked after scoring starts.','ලකුණු ඇතුළත් කිරීම ඇරඹුණු පසු තරග විස්තර වෙනස් කළ නොහැක.')}</p>`:''}
   ${isAdmin ? `<form id="scorer-assignment" class="inline-form">
-   <label>${tr('Scorer’s ChatGPT email','ලකුණු සටහන්කරුගේ ChatGPT ඊමේල් ලිපිනය')}
+   <label>${tr('Scorer’s GitHub email','ලකුණු සටහන්කරුගේ GitHub ඊමේල් ලිපිනය')}
     <input name="email" type="email" maxlength="254" value="${safe(match.scorerEmail || '')}">
    </label>
    <button class="button" type="submit">${tr('Save assignment','පැවරීම සුරකින්න')}</button>

@@ -1,5 +1,4 @@
-import { getChatGPTUser, type ChatGPTUser } from '@/app/chatgpt-auth';
-import { env } from 'cloudflare:workers';
+import { configuredAppOrigin, getSessionUser, type SessionUser } from '@/app/session-auth';
 import { getDb } from '@/db';
 import { cricketMatches, cricketPoints, cricketSquads } from '@/db/schema';
 import { and, desc, eq, or, isNotNull, sql } from 'drizzle-orm';
@@ -8,10 +7,10 @@ import { summarizeMatch } from './summary.mjs';
 import { validateConfig, replay, appendCommand, ScoreError, chaseTarget } from './engine.mjs';
 export const json = (data: unknown,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 export class ApiError extends Error { constructor(message:string,public status=400){super(message);} }
-export async function user(){const u=await getChatGPTUser();if(!u)throw new ApiError('Sign in to manage your matches.',401);return u;}
+export async function user(){const u=await getSessionUser();if(!u)throw new ApiError('Sign in to manage your matches.',401);return u;}
 export async function body(request:Request){
  const origin=request.headers.get('origin');
- if(origin && origin!==new URL(request.url).origin)throw new ApiError('Cross-origin write rejected.',403);
+ if(origin && origin!==new URL(request.url).origin && origin!==configuredAppOrigin())throw new ApiError('Cross-origin write rejected.',403);
  if(request.headers.get('x-matchday-action')!=='1'||!request.headers.get('content-type')?.includes('application/json'))throw new ApiError('Use the match scoring form.',403);
  if(Number(request.headers.get('content-length')||0)>25000)throw new ApiError('Request is too large.',413);
  const text=await request.text();if(text.length>25000)throw new ApiError('Request is too large.',413);
@@ -19,17 +18,17 @@ export async function body(request:Request){
 }
 export async function safely(action:()=>Promise<Response>){try{return await action();}catch(error){if(error instanceof ApiError)return json({error:error.message},error.status);if(error instanceof ScoreError)return json({error:error.message},400);console.error('Match API failed',error);return json({error:'Unable to save or load this match. Please retry. Your last saved score is unchanged.'},500);}}
 type MatchRow = typeof cricketMatches.$inferSelect;
-const emailFor = (u: ChatGPTUser) => u.email.trim().toLowerCase();
-export function canCreate(u:ChatGPTUser){
- return !!env.MATCHDAY_ADMIN_EMAIL && emailFor(u)===env.MATCHDAY_ADMIN_EMAIL.trim().toLowerCase();
+const emailFor = (u: SessionUser) => u.email.trim().toLowerCase();
+export function canCreate(u:SessionUser){
+ return !!process.env.MATCHDAY_ADMIN_EMAIL && emailFor(u)===process.env.MATCHDAY_ADMIN_EMAIL.trim().toLowerCase();
 }
 export async function requireAdministrator(){
  const u=await user();
  if(!canCreate(u))throw new ApiError('Only the Site administrator can create matches or manage squads.',403);
  return u;
 }
-const accessFor = (u: ChatGPTUser) => or(eq(cricketMatches.ownerId,u.userId),eq(cricketMatches.scorerEmail,emailFor(u)));
-function present(row:MatchRow,u:ChatGPTUser,detail=false){const config=JSON.parse(row.config);const journal=JSON.parse(row.journal);const isOwner=row.ownerId===u.userId;return {id:row.id,role:isOwner?'admin':'scorer',approvedAt:row.approvedAt,publicScore:!!row.publicScore,publishedAt:row.publishedAt,...(isOwner?{scorerEmail:row.scorerEmail,canEditFixture:!row.approvedAt&&journal.length===0}:{}),config,revision:row.revision,createdAt:row.createdAt,updatedAt:row.updatedAt,state:replay(config,journal),...(detail?{history:journal.map((e:any)=>({id:e.id,at:e.at,command:e.command}))}:{})};}
+const accessFor = (u: SessionUser) => or(eq(cricketMatches.ownerId,u.userId),eq(cricketMatches.scorerEmail,emailFor(u)));
+function present(row:MatchRow,u:SessionUser,detail=false){const config=JSON.parse(row.config);const journal=JSON.parse(row.journal);const isOwner=row.ownerId===u.userId;return {id:row.id,role:isOwner?'admin':'scorer',approvedAt:row.approvedAt,publicScore:!!row.publicScore,publishedAt:row.publishedAt,...(isOwner?{scorerEmail:row.scorerEmail,canEditFixture:!row.approvedAt&&journal.length===0}:{}),config,revision:row.revision,createdAt:row.createdAt,updatedAt:row.updatedAt,state:replay(config,journal),...(detail?{history:journal.map((e:any)=>({id:e.id,at:e.at,command:e.command}))}:{})};}
 export async function listMatches(){const u=await user();const rows=await getDb().select().from(cricketMatches).where(accessFor(u)).orderBy(desc(cricketMatches.updatedAt)).limit(100);return json({matches:rows.map(r=>present(r,u)),limit:100});}
 export async function createMatch(request:Request){const u=await requireAdministrator();const data=await body(request);const config=validateConfig(data.config);if(typeof data.id!=='string'||!/^[a-zA-Z0-9_-]{10,80}$/.test(data.id))throw new ApiError('Invalid request ID.');const db=getDb();const now=new Date().toISOString();await db.insert(cricketMatches).values({id:data.id,ownerId:u.userId,config:JSON.stringify(config),journal:'[]',revision:0,createdAt:now,updatedAt:now}).onConflictDoNothing();const [row]=await db.select().from(cricketMatches).where(and(eq(cricketMatches.id,data.id),eq(cricketMatches.ownerId,u.userId)));if(!row)throw new ApiError('Could not create match.',409);return json({match:present(row,u,true)},201);}
 export async function getMatch(id:string){const u=await user();const [row]=await getDb().select().from(cricketMatches).where(and(eq(cricketMatches.id,id),accessFor(u)));if(!row)throw new ApiError('Match not found.',404);return json({match:present(row,u,true)});}
@@ -78,7 +77,7 @@ export async function manageMatch(request:Request,id:string){
   case 'assign': {
    const email=typeof input.email==='string'?input.email.trim().toLowerCase():null;
    if(email===null || (email && (email.length>254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))))
-    throw new ApiError('Enter the scorer’s ChatGPT email address.');
+    throw new ApiError('Enter the scorer’s primary GitHub email address.');
    if(email===emailFor(u))throw new ApiError('You already manage this match.');
    changes.scorerEmail=email||null;
    break;
@@ -141,7 +140,7 @@ const competitionName = sql<string>`trim(json_extract(${cricketMatches.config}, 
 const competitionKey = sql<string>`lower(${competitionName})`;
 
 async function spectatorVisibility(){
- const viewer=await getChatGPTUser();
+ const viewer=await getSessionUser();
  return and(isNotNull(cricketMatches.publishedAt),
   viewer ? or(eq(cricketMatches.publicScore,1),accessFor(viewer)) : eq(cricketMatches.publicScore,1));
 }
@@ -188,7 +187,7 @@ export async function competitionStandings(competition:string|null){
  const key=sql`lower(trim(${competition}))`;
  const [visible]=await getDb().select({id:cricketMatches.id}).from(cricketMatches).where(and(await spectatorVisibility(),eq(competitionKey,key))).limit(1);
  const [savedRules]=visible?await getDb().select().from(cricketPoints).where(eq(cricketPoints.competition,key)):[];
- const viewer=await getChatGPTUser();
+ const viewer=await getSessionUser();
  const [owned]=viewer&&canCreate(viewer)?await getDb().select({id:cricketMatches.id}).from(cricketMatches).where(and(eq(cricketMatches.ownerId,viewer.userId),isNotNull(cricketMatches.publishedAt),eq(competitionKey,key))).limit(1):[];
  const results = rows.flatMap(row=>{
   const config = validateConfig(JSON.parse(row.config));

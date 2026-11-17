@@ -43,3 +43,9 @@ yarn-error.log*
 
 # OS metadata
 .DS_Store
+
+# Vercel project linkage
+/.vercel/
+
+# Local SQLite database
+/local.db*

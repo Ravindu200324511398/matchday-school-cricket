@@ -1,39 +1,21 @@
-# Matchday — school cricket, stage 2
+# Matchday School Cricket
 
-A private Sites application with a bilingual English/Sinhala interface, a public-facing demo design and an authenticated match-scoring workspace. Built with the supplied Vinext/Cloudflare Worker starter, D1, Drizzle and the existing HTML/CSS/JS UI.
+Matchday is a bilingual English and Sinhala school cricket app with fixtures, scorecards, competitions, standings, player statistics, and a match administration workspace. The overview includes clearly labeled demo data. Published matches use the scoring database.
 
-## Working scope
-- Public UI: original stage-1 demo match/tournament/player pages, filters, scorecard and resource links.
-- My matches: signed-in user-owned records; create a match with teams, 2–11 players each, competition, venue, date, overs (1–50), batting-first selection and optional free-hit rule.
-- Scorer: opening batters/bowler, next batter/new bowler, runs, boundaries, wides, no-balls, byes/leg-byes, supported wickets, innings changes, result calculation, strike corrections and undo.
-- Server-authoritative replay; persistent event history; optimistic revision checks; idempotent action IDs and safe retry after an uncertain save.
-- JSON scorecard export, loading/error/empty states, language preference in browser storage. Match data lives in D1, not localStorage.
-- Owner-private Site audience is preserved. Every record API requires platform identity and matches the record owner; there is no anonymous write access.
+## Local development
 
-## Important limits
-This is a development milestone, not a fully implemented replacement for SLSCA. The public demo is not connected to real scores. The private workspace only supports one innings per team, standard six-ball overs and a one-run wide/no-ball penalty. No DLS, super overs, penalty-run adjustments, retirements, multi-day matches, roster editing after creation, official approval, scorer assignment, school/tournament administration or original API integration yet. Run-out end corrections must be applied with the explicit Swap ends control where the umpire requires them. Confirm applicable school competition rules before official use.
+Use Node 24. Install dependencies with `npm ci`. For a local SQLite database, set `TURSO_DATABASE_URL=file:local.db` in your environment, then run `npm run db:migrate` and `npm run dev`. Set `MATCHDAY_APP_URL=http://localhost:3000` and register a corresponding GitHub OAuth callback if you need local sign-in.
 
-Scorer authentication uses Sites' ChatGPT sign-in. Your own matches are private; separately managed administrator/scorer/viewer accounts and public score sharing remain future work. Do not change the Site audience expecting shared scoring: owner authorization is enforced per record.
+- `npm test` runs the scoring and match summary tests.
+- `npm run build` assembles the browser scripts and builds Next.js.
+- `npm run db:generate` generates schema changes. Apply them with `npm run db:migrate`.
 
-## Source and local workflow
-- `public/core.js`: public demo UI.
-- `public/workspace.js`: authenticated match administration and scoring UI.
-- `public/i18n.js`: bilingual labels and route integration.
-- `node scripts/compose-ui.mjs`: combines these into `public/app.js`; run before build after UI edits.
-- `lib/cricket/engine.mjs`: pure replayable scoring engine.
-- `lib/cricket/api.ts`, `app/api/`: owner authorization, input validation, D1 persistence and revision checks.
-- `db/schema.ts`, `drizzle/`: schema and migrations. Generate with `npm run db:generate`; never edit applied migrations.
-- `node --test tests/engine.test.mjs`: scoring regression tests.
-- `npm run dev`: Vinext preview (local preview identity is supplied by the starter).
-- Build and package via the Sites skill helper. Hosting manifest retains the Site project ID and D1 binding `DB`.
-- Preview database and hosted database are separate; no sample match records are seeded into production.
+## Vercel setup
 
-## Reference rules
-- MCC Laws of Cricket (2026): https://www.lords.org/getattachment/d9eb43d5-5935-4634-b170-da698e0e9d6e/Laws-of-Cricket-2017-Code-4th-Edition-%282026%29.pdf
-- New South Wales Cricket Umpires' and Scorers' Association scoring manual (balls faced/no-ball convention): https://nswcusa.cricketnsw.com.au/app/uploads/2020/05/Scorers-Manual-130922-w-sheets.pdf
-These are reference sources for the supported core, not confirmation of SLSCA competition-specific playing conditions.
+1. Deploy with the Next.js framework preset. Connect a Turso SQLite database and configure `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in Vercel. Apply the checked-in migrations once to the production database using `npm run db:migrate` with the production database variables loaded in your shell.
+2. Create a GitHub OAuth app with your production deployment's home URL and `/auth/callback` as the callback path. Set `MATCHDAY_GITHUB_CLIENT_ID` and `MATCHDAY_GITHUB_CLIENT_SECRET` in Vercel.
+3. Set `MATCHDAY_APP_URL` to the production origin used by the OAuth app. Set `MATCHDAY_SESSION_SECRET` to a random secret of at least 32 characters, such as the output of `openssl rand -hex 32`. Set `MATCHDAY_ADMIN_EMAIL` to the administrator's verified primary GitHub email. Redeploy after updating environment variables.
 
-## Next stages
-3. Agree official scoring/competition rules and validate the scorer against sample scorebooks. Add admin/scorer roles, school/player/tournament management and result approval.
-4. Integrate authorized public data, scheduled fixture management, standings and season aggregates.
-5. Add advanced match formats, offline synchronization, backup/restore, migration and operational testing before official rollout.
+Set a separate database and GitHub OAuth registration for preview deployments that need scoring access. Match ownership is tied to the authenticated GitHub account ID. A new Turso database starts empty. Importing existing Sites/D1 records requires mapping Site owners to their new GitHub account IDs before importing.
+
+See the [Turso Vercel integration](https://vercel.com/marketplace/tursocloud/database) and [GitHub OAuth app setup](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app).
