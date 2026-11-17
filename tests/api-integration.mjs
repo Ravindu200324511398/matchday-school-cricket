@@ -1,0 +1,30 @@
+// Integration check against the local Vite/Vinext preview only.
+import assert from 'node:assert/strict';
+const origin=process.argv[2]||'http://127.0.0.1:5173';
+assert.ok(['localhost','127.0.0.1'].includes(new URL(origin).hostname),'Only a local preview may be tested');
+const anon=await fetch(origin+'/api/matches');assert.equal(anon.status,401);
+const login=await fetch(origin+'/signin-with-chatgpt?return_to=/',{redirect:'manual'});
+const cookie=login.headers.get('set-cookie')?.split(';')[0];assert.ok(cookie,'Local sign-in should supply a test session');
+async function request(path,body,more={}){const r=await fetch(origin+path,{method:body?'POST':'GET',headers:{Cookie:cookie,...(body?{'Content-Type':'application/json','X-Matchday-Action':'1',Origin:origin}:{}),...more},...(body?{body:JSON.stringify(body)}:{})});const text=await r.text();let data;try{data=JSON.parse(text)}catch{data={error:text}}return {status:r.status,data};}
+const id=crypto.randomUUID(),config={teamA:'QA Home',teamB:'QA Away',competition:'LOCAL TEST ONLY',venue:'Local preview',date:'2026-11-15',overs:1,firstBat:'A',freeHit:true,playersA:['A1','A2','A3'],playersB:['B1','B2','B3']};
+let r=await request('/api/matches',{id,config},{Origin:'https://external.invalid'});assert.equal(r.status,403);
+r=await request('/api/matches',{id,config});assert.equal(r.status,201);assert.equal(r.data.match.revision,0);
+r=await request('/api/matches',{id,config});assert.equal(r.status,201);assert.equal(r.data.match.id,id,'create retry returns same match');
+const eventId=crypto.randomUUID();const opening={eventId,revision:0,command:{type:'start',striker:0,nonStriker:1,bowler:0}};
+r=await request('/api/matches/'+id,opening);assert.equal(r.status,200);assert.equal(r.data.match.revision,1);
+r=await request('/api/matches/'+id,opening);assert.equal(r.status,200);assert.equal(r.data.match.revision,1);assert.equal(r.data.duplicate,true);
+r=await request('/api/matches/'+id,{...opening,eventId:crypto.randomUUID()});assert.equal(r.status,409);
+const scoring={eventId:crypto.randomUUID(),revision:1,command:{type:'ball',runs:4,extra:'none',boundary:true,wicket:null,out:'striker'}};
+const simultaneous=await Promise.all([request('/api/matches/'+id,scoring),request('/api/matches/'+id,{...scoring,eventId:crypto.randomUUID()})]);
+assert.deepEqual(simultaneous.map(r=>r.status).sort(),[200,409]);
+r=await request('/api/matches/'+id);assert.equal(r.data.match.state.innings[0].total,4);assert.equal(r.data.match.revision,2);
+r=await request('/api/matches/'+id,{eventId:crypto.randomUUID(),revision:2,command:{type:'ball',runs:4,extra:'wide',boundary:true,wicket:'bowled',out:'striker'}});assert.equal(r.status,400);
+r=await request('/api/matches/'+id,{eventId:crypto.randomUUID(),revision:2,command:{type:'undo'}});assert.equal(r.status,200);assert.equal(r.data.match.state.innings[0].total,0);assert.equal(r.data.match.history.length,3);
+r=await request('/api/matches/'+id);assert.equal(r.data.match.state.innings[0].total,0,'Reload reads persistent correction');
+r=await request('/api/matches/'+id+'/live');assert.equal(r.status,200);assert.equal(r.data.match.state.innings[0].total,0);assert.equal(r.data.match.analysis[0].overs.length,0);assert.equal('history' in r.data.match,false);
+const liveRevision=r.data.match.revision;
+r=await request('/api/matches/'+id+'/live?revision='+liveRevision);assert.equal(r.data.unchanged,true);assert.equal('match' in r.data,false);
+r=await request('/api/matches/'+id+'/live?revision=0');assert.ok(r.data.match);
+const liveAnon=await fetch(origin+'/api/matches/'+id+'/live?revision='+liveRevision);assert.equal(liveAnon.status,401);
+const unauthorized=await fetch(origin+'/api/matches/'+id);assert.equal(unauthorized.status,401);
+console.log('PASS: anonymous rejection, CSRF, create retry, persistence, duplicate action, concurrent revision, validation, undo history, reload, private live projection and unchanged-revision polling.');
