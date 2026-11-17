@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1794748058212,
+      "tag": "0000_youthful_toro",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794840435601,
+      "tag": "0001_certain_leopardon",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794841086272,
+      "tag": "0002_grey_ultragirl",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794885902531,
+      "tag": "0003_outgoing_roland_deschain",
+      "breakpoints": true
+    }
+  ]
+}
